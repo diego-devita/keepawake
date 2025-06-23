@@ -88,9 +88,9 @@ class RealTimeMenu : Form
         exitButton.Margin = new Padding(0, 10, 0, 0);
         exitButton.AutoSize = true;
         exitButton.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        exitButton.Click += (s, e) => Application.Exit();
+        exitButton.Click += delegate { Application.Exit(); };
 
-        var layout = new TableLayoutPanel();
+        TableLayoutPanel layout = new TableLayoutPanel();
         layout.ColumnCount = 1;
         layout.RowCount = 2;
         layout.Dock = DockStyle.Fill;
@@ -107,14 +107,9 @@ class RealTimeMenu : Form
 
     public void UpdateDisplay()
     {
-        string text = string.Format(
-            "Inattivo da: {0}s\nF15 attivo: {1}\nNotifiche: {2}\nSoglia inattività: {3}s\nOverlay attivo: {4}",
-            monitor.GetLastIdleSeconds(),
-            monitor.GetF15Status(),
-            monitor.GetShowNotifications(),
-            monitor.GetIdleThreshold(),
-            monitor.GetOverlayStatus()
-        );
+        string text = "Inattivo da: " + monitor.GetLastIdleSeconds() + "s\nF15 attivo: " + monitor.GetF15Status() +
+            "\nNotifiche: " + monitor.GetShowNotifications() +
+            "\nSoglia inattività: " + monitor.GetIdleThreshold() + "s\nOverlay attivo: " + monitor.GetOverlayStatus();
         label.Text = text;
     }
 
@@ -193,6 +188,25 @@ class KeepAwakeMonitor : Form
         Visible = false;
     }
 
+    private void LogEvent(string message)
+    {
+        try
+        {
+            string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+            if (!Directory.Exists(logDir))
+                Directory.CreateDirectory(logDir);
+
+            string logFile = Path.Combine(logDir, DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+            string timestamp = DateTime.Now.ToString("dd/MM/yyyy HH.mm.ss");
+            string line = message + ": " + timestamp;
+            File.AppendAllText(logFile, line + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("Log error: " + ex.Message);
+        }
+    }
+
     private void TrayIcon_MouseClick(object sender, MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left)
@@ -216,22 +230,22 @@ class KeepAwakeMonitor : Form
     {
         string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
         if (!File.Exists(configPath)) return;
-        var lines = File.ReadAllLines(configPath);
-        foreach (var line in lines)
+        string[] lines = File.ReadAllLines(configPath);
+        foreach (string line in lines)
         {
             string trimmed = line.Trim();
             if (trimmed.StartsWith("[") || trimmed == "" || trimmed.StartsWith(";")) continue;
-            var parts = trimmed.Split('=');
+            string[] parts = trimmed.Split('=');
             if (parts.Length != 2) continue;
             string key = parts[0].Trim().ToLower();
             string value = parts[1].Trim();
-            if (key == "idlethresholdseconds") { int.TryParse(value, out idleThresholdSeconds); }
-            if (key == "f15intervalseconds") { int.TryParse(value, out f15IntervalSeconds); }
-            if (key == "shownotifications") { showNotifications = value.ToLower() == "true"; }
-            if (key == "notificationduration") { int.TryParse(value, out notificationDuration); }
-            if (key == "showidleoverlay") { showIdleOverlay = value.ToLower() == "true"; }
-            if (key == "iconidle") { iconIdleName = value; }
-            if (key == "iconactive") { iconActiveName = value; }
+            if (key == "idlethresholdseconds") int.TryParse(value, out idleThresholdSeconds);
+            if (key == "f15intervalseconds") int.TryParse(value, out f15IntervalSeconds);
+            if (key == "shownotifications") showNotifications = value.ToLower() == "true";
+            if (key == "notificationduration") int.TryParse(value, out notificationDuration);
+            if (key == "showidleoverlay") showIdleOverlay = value.ToLower() == "true";
+            if (key == "iconidle") iconIdleName = value;
+            if (key == "iconactive") iconActiveName = value;
         }
     }
 
@@ -258,6 +272,7 @@ class KeepAwakeMonitor : Form
             {
                 if (mouseMoved)
                 {
+                    LogEvent("Activity detected (" + (actualIdleSeconds / 60) + "m" + (actualIdleSeconds % 60) + "s)");
                     actualIdleSeconds = 0;
                     isPressingF15 = false;
                     trayIcon.Icon = iconIdle;
@@ -278,6 +293,10 @@ class KeepAwakeMonitor : Form
             {
                 if (mouseMoved || keyboardUsed)
                 {
+                    if (actualIdleSeconds >= idleThresholdSeconds)
+                    {
+                        LogEvent("Activity detected (" + (actualIdleSeconds / 60) + "m" + (actualIdleSeconds % 60) + "s)");
+                    }
                     actualIdleSeconds = 0;
                 }
                 else
@@ -285,8 +304,9 @@ class KeepAwakeMonitor : Form
                     actualIdleSeconds++;
                 }
 
-                if (actualIdleSeconds >= idleThresholdSeconds)
+                if (actualIdleSeconds == idleThresholdSeconds)
                 {
+                    LogEvent("Inactivity detected [timeout: " + idleThresholdSeconds + "sec]");
                     isPressingF15 = true;
                     trayIcon.Icon = iconActive;
                     if (showNotifications)
@@ -296,7 +316,7 @@ class KeepAwakeMonitor : Form
                         this.Invoke((MethodInvoker)delegate
                         {
                             overlayForm = new IdleOverlayForm();
-                            overlayForm.StartTimer(() => lastIdle);
+                            overlayForm.StartTimer(delegate { return lastIdle; });
                             overlayForm.Show();
                         });
                     }
